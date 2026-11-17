@@ -1,0 +1,41 @@
+# Every check a release runs, on pull requests and on pushes to main.
+# Every action is pinned to a full commit SHA (its release in the comment).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Generate check, typecheck, test, build, package lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The pnpm version comes from "packageManager" in package.json.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generated types match openapi/openapi.yaml
+        run: pnpm run generate:check
+      - name: Typecheck (source, tests and every README example)
+        run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm run build
+      - run: npm pack --dry-run
+      - name: publint and Are the Types Wrong
+        run: pnpm run lint:package

@@ -1,0 +1,1088 @@
+# Charchy Send (Namabar) — the public contract of the Email API, v1.
+#
+# Written by hand, next to the code that serves it. The developer docs render
+# it at https://charchy.krd/docs/api-reference and serve it raw, exactly as
+# written (comments included — keep them fit to publish), at
+# https://charchy.krd/docs/openapi.yaml.
+#
+# Change this file in the same commit as the behaviour it describes. Error
+# codes and field names are published to developers: never rename one.
+#
+# The public SDK (github.com/charchyy/charchy-send) generates its types from
+# this file as published at charchy.krd/docs/openapi.yaml — keep changes
+# additive.
+openapi: 3.1.0
+info:
+  title: Charchy Send API
+  version: "1.0.0"
+  summary: Transactional email for your app, sent from your own domain.
+  description: |
+    Send transactional email — sign-in codes, password resets, receipts,
+    order and booking updates — from your own verified domain.
+
+    Every request is authenticated with an API key in the `Authorization`
+    header. Test keys (`chy_test_…`) go through every check but never send;
+    live keys (`chy_live_…`) send real mail. Keys belong on your server: the
+    API sends no CORS headers.
+
+    Every error answers `{ "error": { "code", "message", "docs" } }`, and
+    `docs` links to the code's section of https://charchy.krd/docs/errors.
+  contact:
+    name: Charchy support
+    email: support@charchy.krd
+    url: https://charchy.krd/docs
+servers:
+  - url: https://api.charchy.krd/v1
+    description: Production
+security:
+  - apiKey: []
+tags:
+  - name: Emails
+    description: Send emails, read their status, reschedule or cancel them.
+  - name: Images
+    description: Host images for your emails on files.charchy.krd.
+  - name: Usage
+    description: Your plan, credits, caps and limits.
+
+paths:
+  /emails:
+    post:
+      tags: [Emails]
+      operationId: sendEmail
+      summary: Send an email
+      description: |
+        Accepts one email and queues it (or schedules it, with
+        `scheduled_at`). The answer comes back at once; delivery is reported
+        by webhooks and `GET /emails/{id}`.
+
+        Charged per recipient when accepted, refunded if the email is
+        canceled, expires, is suppressed or fails for good.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendEmailRequest"
+            examples:
+              order:
+                summary: An order confirmation
+                value:
+                  from: Darin Game <orders@daringaming.com>
+                  to: [customer@example.com]
+                  reply_to: support@daringaming.com
+                  subject: "Your order #4821"
+                  html: <p>Thanks for your order!</p>
+                  tags:
+                    type: order_confirmation
+              signInCode:
+                summary: A sign-in code that expires
+                value:
+                  from: My App <no-reply@myapp.example>
+                  to: [user@example.com]
+                  subject: "Your sign-in code: 482910"
+                  text: Your code is 482910. It expires in 10 minutes.
+                  expires_at: "2026-11-16T12:10:00Z"
+      responses:
+        "200":
+          description: Accepted.
+          headers:
+            ratelimit-limit: { $ref: "#/components/headers/RateLimitLimit" }
+            ratelimit-remaining: { $ref: "#/components/headers/RateLimitRemaining" }
+            ratelimit-reset: { $ref: "#/components/headers/RateLimitReset" }
+            x-charchy-emails-remaining: { $ref: "#/components/headers/EmailsRemaining" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedEmail"
+              example:
+                id: em_8f2k1x9q4w7m3n5p6r0s2t4v
+                status: queued
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/InsufficientBalance" }
+        "403": { $ref: "#/components/responses/SendForbidden" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/SendingUnavailable" }
+
+    get:
+      tags: [Emails]
+      operationId: listEmails
+      summary: List emails
+      description: |
+        Your workspace's emails of the last 30 days, newest first, with cursor
+        pagination. Needs a key with full permission.
+      parameters:
+        - name: limit
+          in: query
+          description: Page size, 1–100.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: after
+          in: query
+          description: The `next_cursor` of the previous page.
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/EmailStatus" }
+        - name: tag
+          in: query
+          description: A tag as `key:value`, e.g. `type:order_confirmation`.
+          schema: { type: string }
+        - name: to
+          in: query
+          description: A recipient address.
+          schema: { type: string, format: email }
+      responses:
+        "200":
+          description: A page of emails.
+          headers:
+            ratelimit-limit: { $ref: "#/components/headers/RateLimitLimit" }
+            ratelimit-remaining: { $ref: "#/components/headers/RateLimitRemaining" }
+            ratelimit-reset: { $ref: "#/components/headers/RateLimitReset" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailList"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/RestrictedKey" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /emails/batch:
+    post:
+      tags: [Emails]
+      operationId: sendEmailBatch
+      summary: Send a batch
+      description: |
+        Up to 100 emails in one request, without attachments. Validation is
+        all-or-nothing: one invalid email and nothing is sent, with every
+        problem listed by index. Charged once for the whole batch.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRequest"
+      responses:
+        "200":
+          description: Every email accepted. Ids are in request order.
+          headers:
+            ratelimit-limit: { $ref: "#/components/headers/RateLimitLimit" }
+            ratelimit-remaining: { $ref: "#/components/headers/RateLimitRemaining" }
+            ratelimit-reset: { $ref: "#/components/headers/RateLimitReset" }
+            x-charchy-emails-remaining: { $ref: "#/components/headers/EmailsRemaining" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/InsufficientBalance" }
+        "403": { $ref: "#/components/responses/SendForbidden" }
+        "409": { $ref: "#/components/responses/IdempotencyConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422":
+          description: At least one email is invalid. Nothing was sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchValidationError"
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/SendingUnavailable" }
+
+  /emails/{id}:
+    parameters:
+      - $ref: "#/components/parameters/EmailId"
+    get:
+      tags: [Emails]
+      operationId: getEmail
+      summary: Get an email
+      description: |
+        An email's status, recipients, tags, timestamps and event timeline.
+        Kept for 30 days. Needs a key with full permission.
+      responses:
+        "200":
+          description: The email.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Email"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/RestrictedKey" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    patch:
+      tags: [Emails]
+      operationId: rescheduleEmail
+      summary: Reschedule an email
+      description: Changes `scheduled_at` while the email is still `scheduled`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RescheduleRequest"
+      responses:
+        "200":
+          description: Rescheduled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RescheduledEmail"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/RestrictedKey" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /emails/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/EmailId"
+    post:
+      tags: [Emails]
+      operationId: cancelEmail
+      summary: Cancel an email
+      description: |
+        Cancels an email that is `scheduled` or `queued`. It is refunded and
+        fires `email.canceled`.
+      responses:
+        "200":
+          description: Canceled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedEmail"
+              example:
+                id: em_5k2m8x1q9w3r3n5p6r0s2t4v
+                status: canceled
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/RestrictedKey" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /usage:
+    get:
+      tags: [Usage]
+      operationId: getUsage
+      summary: Get usage
+      description: |
+        Where your workspace stands: this term's plan emails, your credits and
+        their expiry, today's cap, the rate limit, and today's test sends.
+        Needs a key with full permission.
+      responses:
+        "200":
+          description: Your usage right now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Usage"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/RestrictedKey" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /images:
+    post:
+      tags: [Images]
+      operationId: uploadImage
+      summary: Upload an image
+      description: |
+        Hosts an image on files.charchy.krd and returns its permanent public
+        URL, for `<img src>` in your emails. PNG, JPEG, GIF or WebP (no SVG),
+        up to 2 MB, up to 200 per workspace.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The image file.
+      responses:
+        "200":
+          description: Uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Image"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/RestrictedKey" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+webhooks:
+  email-event:
+    post:
+      operationId: emailEvent
+      summary: Email events
+      description: |
+        Sent to your endpoint when an email changes state. `type` is one of
+        `email.sent`, `email.delivered`, `email.delivery_delayed`,
+        `email.bounced`, `email.complained`, `email.failed`,
+        `email.suppressed`, `email.expired`, `email.canceled`.
+
+        One event per recipient for `email.delivered`,
+        `email.delivery_delayed`, `email.bounced`, `email.complained` and
+        `email.suppressed` — `data.recipient` names the address. `email.sent`,
+        `email.failed`, `email.expired` and `email.canceled` come once per
+        email. Emails sent with a test key, and the magic addresses, fire
+        these events too.
+
+        Signed with the Standard Webhooks spec: verify `webhook-signature`
+        against the raw body, reject timestamps older than 5 minutes, and
+        dedupe by `webhook-id`. Order is not guaranteed. Answer 2xx within
+        5 seconds; `410 Gone` disables the endpoint. Requests carry
+        `user-agent: Charchy-Webhooks/1.0 (+https://charchy.krd/docs/webhooks)`.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/WebhookTimestamp"
+        - $ref: "#/components/parameters/WebhookSignature"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailWebhookEvent"
+      responses:
+        "2XX":
+          description: Received. Do the work after answering.
+  domain-event:
+    post:
+      operationId: domainEvent
+      summary: Domain events
+      description: |
+        `domain.verified` when a sending domain is verified and ready to send
+        from (again, too, once a domain that lost its records has them back);
+        `domain.failed` when its verification fails — the DKIM records weren't
+        found within 72 hours, or setting the domain up failed — or when a
+        verified domain's records are gone at two daily re-checks a few hours
+        apart. Signed like every event.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/WebhookTimestamp"
+        - $ref: "#/components/parameters/WebhookSignature"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DomainWebhookEvent"
+      responses:
+        "2XX":
+          description: Received.
+  account-event:
+    post:
+      operationId: accountEvent
+      summary: Account events
+      description: |
+        `account.paused` when sending is paused for your workspace (whoever
+        paused it), `account.resumed` when it resumes, and `balance.low` when
+        what you have left falls to 20% of what you had after your last
+        top-up (`used_percent: 80`) and when it reaches zero (`100`) — once
+        each per top-up. A top-up is a plan term starting, or credits added.
+        Signed like every event.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/WebhookTimestamp"
+        - $ref: "#/components/parameters/WebhookSignature"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountWebhookEvent"
+      responses:
+        "2XX":
+          description: Received.
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer chy_live_…` (or `chy_test_…`). A live key may
+        be sending-only, and may be locked to one domain.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        1–256 characters, no control characters, kept 24 hours per
+        workspace. The same key with the same body returns the first response
+        again; with a different body, `409 idempotency_conflict`; an empty,
+        too long or malformed key, `400 invalid_idempotency_key`. Send one on
+        every request, e.g. `<event-type>/<entity-id>`.
+      schema: { type: string, minLength: 1, maxLength: 256 }
+      example: order-confirmation/4821
+    EmailId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: "^em_" }
+      example: em_8f2k1x9q4w7m3n5p6r0s2t4v
+    WebhookId:
+      name: webhook-id
+      in: header
+      required: true
+      description: The event's id (`evt_…`), the same on every retry. Dedupe by it.
+      schema: { type: string }
+    WebhookTimestamp:
+      name: webhook-timestamp
+      in: header
+      required: true
+      description: Unix seconds when this attempt was signed. Reject if older than 5 minutes.
+      schema: { type: string }
+    WebhookSignature:
+      name: webhook-signature
+      in: header
+      required: true
+      description: |
+        One or more `v1,<base64 HMAC-SHA256 of "id.timestamp.body">`,
+        separated by spaces (two during a secret rotation).
+      schema: { type: string }
+
+  headers:
+    RateLimitLimit:
+      description: Requests allowed in the current window.
+      schema: { type: integer }
+    RateLimitRemaining:
+      description: Requests left in the current window.
+      schema: { type: integer }
+    RateLimitReset:
+      description: Seconds until the window resets.
+      schema: { type: integer }
+    EmailsRemaining:
+      description: Emails left to spend — this month's plan emails plus credits.
+      schema: { type: integer }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer }
+
+  schemas:
+    EmailStatus:
+      type: string
+      enum:
+        - scheduled
+        - queued
+        - sending
+        - sent
+        - delivered
+        - delivery_delayed
+        - bounced
+        - complained
+        - canceled
+        - expired
+        - suppressed
+        - failed
+        - unknown
+      description: |
+        `sent` = our delivery infrastructure accepted it; `delivered` = the
+        receiving server did. `unknown` = no delivery event 30 minutes after
+        an uncertain send (never re-sent; the charge stays).
+
+        With several recipients the status sums them up: `complained` if
+        any recipient complained, else `bounced` if any bounced, else
+        `delivered` once EVERY recipient was delivered, else
+        `delivery_delayed` if any is delayed, else `sent`. Each recipient's
+        own events are in `events`, with `recipient`.
+
+    Address:
+      type: string
+      description: "`address@domain` or `Name <address@domain>`. Display names may be Kurdish or Arabic."
+      examples: ["Darin Game <orders@daringaming.com>"]
+
+    AddressList:
+      description: One address, or an array of them.
+      oneOf:
+        - $ref: "#/components/schemas/Address"
+        - type: array
+          items: { $ref: "#/components/schemas/Address" }
+
+    Tags:
+      type: object
+      maxProperties: 10
+      description: Up to 10 pairs; keys and values use letters, digits, `_` and `-`, up to 256 characters.
+      propertyNames: { pattern: "^[A-Za-z0-9_-]{1,256}$" }
+      additionalProperties: { type: string, pattern: "^[A-Za-z0-9_-]{1,256}$" }
+      examples: [{ type: order_confirmation }]
+
+    TagsInput:
+      description: |
+        Tags as an object (`{ "type": "order" }`) or as an array of
+        name/value pairs (`[{ "name": "type", "value": "order" }]`). Either
+        way they come back as an object.
+      oneOf:
+        - $ref: "#/components/schemas/Tags"
+        - type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name: { type: string, pattern: "^[A-Za-z0-9_-]{1,256}$" }
+              value: { type: string, pattern: "^[A-Za-z0-9_-]{1,256}$" }
+
+    Attachment:
+      type: object
+      required: [filename, content, content_type]
+      properties:
+        filename: { type: string, examples: [invoice-4821.pdf] }
+        content: { type: string, contentEncoding: base64, description: "The file, base64-encoded." }
+        content_type: { type: string, examples: [application/pdf] }
+        content_id:
+          type: string
+          description: Makes this an inline image, shown by `<img src="cid:<content_id>">` in the html.
+
+    EmailFields:
+      type: object
+      required: [from, to, subject]
+      properties:
+        from:
+          $ref: "#/components/schemas/Address"
+        to:
+          $ref: "#/components/schemas/AddressList"
+          description: "`to` + `cc` + `bcc` together: at most 50 addresses."
+        cc:
+          $ref: "#/components/schemas/AddressList"
+        bcc:
+          $ref: "#/components/schemas/AddressList"
+        reply_to:
+          $ref: "#/components/schemas/AddressList"
+        subject: { type: string, maxLength: 998 }
+        html: { type: string, description: "Up to 512 KB. Give `html`, `text` or both." }
+        text: { type: string, description: "Up to 512 KB. Generated from `html` when missing." }
+        headers:
+          type: object
+          maxProperties: 20
+          additionalProperties: { type: string }
+          description: |
+            Custom headers. Reserved, refused: From, To, Cc, Bcc, Subject,
+            Reply-To, DKIM-*, Return-Path, Message-ID, X-SES-*. No CR or LF
+            in names or values. `List-Unsubscribe` and
+            `List-Unsubscribe-Post` (RFC 8058 one-click) are allowed.
+        tags:
+          $ref: "#/components/schemas/TagsInput"
+        scheduled_at:
+          type: string
+          format: date-time
+          description: Up to 30 days ahead. In the past = now.
+        expires_at:
+          type: string
+          format: date-time
+          description: If the email can't leave by then, it is dropped as `expired` and refunded.
+
+    SendEmailRequest:
+      allOf:
+        - $ref: "#/components/schemas/EmailFields"
+        - type: object
+          properties:
+            attachments:
+              type: array
+              maxItems: 3
+              description: Up to 3 files, 3 MB together before base64.
+              items: { $ref: "#/components/schemas/Attachment" }
+
+    AcceptedEmail:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string, examples: [em_8f2k1x9q4w7m3n5p6r0s2t4v] }
+        status: { $ref: "#/components/schemas/EmailStatus" }
+
+    BatchRequest:
+      type: object
+      required: [emails]
+      properties:
+        emails:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: Same fields as a single email, without attachments.
+          items: { $ref: "#/components/schemas/EmailFields" }
+
+    BatchResponse:
+      type: object
+      required: [emails]
+      properties:
+        emails:
+          type: array
+          items: { $ref: "#/components/schemas/AcceptedEmail" }
+
+    RescheduleRequest:
+      type: object
+      required: [scheduled_at]
+      properties:
+        scheduled_at: { type: string, format: date-time }
+
+    RescheduledEmail:
+      type: object
+      required: [id, status, scheduled_at]
+      properties:
+        id: { type: string }
+        status: { type: string, const: scheduled }
+        scheduled_at: { type: string, format: date-time }
+
+    EmailEvent:
+      type: object
+      required: [type, at]
+      properties:
+        type: { $ref: "#/components/schemas/EmailStatus" }
+        at: { type: string, format: date-time }
+        recipient: { type: string, format: email, description: Set on per-recipient events (delivered, delayed, bounced, complained, suppressed). }
+        bounce:
+          $ref: "#/components/schemas/BounceDetails"
+        reason:
+          $ref: "#/components/schemas/EndReason"
+        message: { type: string, description: "Why, in words (`failed`)." }
+        simulated: { type: boolean, description: Played out by test mode or a magic address — nothing was sent. }
+
+    EndReason:
+      type: string
+      description: Why an email ended without being delivered (`failed`, `expired`, `unknown` events).
+      enum:
+        - expires_at
+        - held_too_long
+        - domain_not_verified
+        - rejected
+        - retries_exhausted
+        - content_missing
+        - recipient_not_allowed
+        - no_answer
+
+    BounceDetails:
+      type: object
+      properties:
+        type: { type: string, enum: [permanent, transient, undetermined], description: "`permanent` = a hard bounce; the address is suppressed." }
+        sub_type: { type: string, examples: [general, no_email, suppressed, mailbox_full, message_too_large] }
+        message: { type: string, examples: ["The recipient's mail server refused the email: the address does not exist."] }
+        diagnostic_code: { type: string, examples: ["smtp; 550 5.1.1 user unknown"] }
+
+    EmailSummary:
+      type: object
+      required: [id, status, from, to, subject, tags, test, created_at, scheduled_at]
+      properties:
+        id: { type: string }
+        status: { $ref: "#/components/schemas/EmailStatus" }
+        from: { type: string }
+        to: { type: array, items: { type: string } }
+        subject: { type: string }
+        tags: { $ref: "#/components/schemas/Tags" }
+        test: { type: boolean, description: Sent with a test key. }
+        created_at: { type: string, format: date-time }
+        scheduled_at: { type: [string, "null"], format: date-time }
+
+    Email:
+      type: object
+      required: [id, status, from, to, cc, bcc, reply_to, subject, tags, test, created_at, scheduled_at, expires_at, events]
+      properties:
+        id: { type: string }
+        status: { $ref: "#/components/schemas/EmailStatus" }
+        from: { type: string }
+        to: { type: array, items: { type: string } }
+        cc: { type: array, items: { type: string } }
+        bcc: { type: array, items: { type: string } }
+        reply_to: { type: array, items: { type: string } }
+        subject: { type: string }
+        tags: { $ref: "#/components/schemas/Tags" }
+        test: { type: boolean, description: Sent with a test key. }
+        created_at: { type: string, format: date-time }
+        scheduled_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/EmailEvent" }
+
+    EmailList:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/EmailSummary" }
+        has_more: { type: boolean }
+        next_cursor: { type: string, description: "Pass as `after` for the next page." }
+
+    Usage:
+      type: object
+      required: [plan, credits, daily, rate_limit, test]
+      properties:
+        plan:
+          description: The current monthly plan, or null without one.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [key, emails_included, emails_used, emails_left, term_ends_at]
+              properties:
+                key: { type: string, enum: [starter, growth, pro, scale], description: The plan. }
+                emails_included: { type: integer }
+                emails_used: { type: integer }
+                emails_left: { type: integer }
+                term_ends_at: { type: string, format: date-time }
+        credits:
+          description: Pay-as-you-go credits, or null with none.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [emails, expires_at]
+              properties:
+                emails: { type: integer }
+                expires_at: { type: string, format: date-time, description: One expiry for the whole balance. }
+        daily:
+          type: object
+          required: [cap, surge_cap, used, resets_at]
+          properties:
+            cap: { type: integer, description: Recipients a rolling 24 hours your plan (or credits) gives. }
+            surge_cap:
+              type: integer
+              description: |
+                The most a rush may reach while your recent sending is healthy:
+                up to twice a plan's or the credits-only cap, never during the
+                sandbox or the first week. Equal to `cap` when there is no surge.
+                Requests are refused with `daily_limit_reached` past this, not past `cap`.
+            used: { type: integer }
+            resets_at: { type: string, format: date-time, description: "When there is room again at `surge_cap`, or when `used` next goes down." }
+        rate_limit:
+          type: object
+          required: [requests_per_second, burst]
+          properties:
+            requests_per_second: { type: integer, examples: [10] }
+            burst: { type: integer, examples: [20] }
+        test:
+          type: object
+          required: [daily_cap, used]
+          properties:
+            daily_cap: { type: integer, examples: [1000] }
+            used: { type: integer }
+      examples:
+        - plan: { key: growth, emails_included: 50000, emails_used: 12840, emails_left: 37160, term_ends_at: "2026-12-14T09:00:00Z" }
+          credits: { emails: 25000, expires_at: "2027-02-10T00:00:00Z" }
+          daily: { cap: 5000, surge_cap: 10000, used: 612, resets_at: "2026-11-17T00:00:00Z" }
+          rate_limit: { requests_per_second: 10, burst: 20 }
+          test: { daily_cap: 1000, used: 37 }
+
+    Image:
+      type: object
+      required: [id, url, content_type, size]
+      properties:
+        id: { type: string, examples: [img_4t8w2k6m1q3n5p6r0s2t4v9x] }
+        url: { type: string, format: uri, examples: ["https://files.charchy.krd/i/4t8w2k6m1q3n5p6r0s2t4v9x/logo.png"] }
+        content_type: { type: string, enum: [image/png, image/jpeg, image/gif, image/webp] }
+        size: { type: integer, description: Bytes. }
+
+    ErrorCode:
+      type: string
+      enum:
+        - invalid_json
+        - invalid_idempotency_key
+        - validation_error
+        - missing_api_key
+        - invalid_api_key
+        - restricted_api_key
+        - domain_not_verified
+        - sender_not_allowed
+        - not_approved
+        - sending_paused
+        - not_found
+        - idempotency_conflict
+        - idempotency_in_flight
+        - payload_too_large
+        - invalid_attachment
+        - too_many_recipients
+        - schedule_out_of_range
+        - insufficient_balance
+        - rate_limit_exceeded
+        - daily_limit_reached
+        - internal_error
+        - sending_unavailable
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            message: { type: string, description: "For people; may change. Match on `code`." }
+            field: { type: string, description: "The request field at fault, when there is one." }
+            docs: { type: string, format: uri, examples: ["https://charchy.krd/docs/errors#domain_not_verified"] }
+
+    BatchValidationError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, items]
+          properties:
+            code: { type: string, const: validation_error }
+            message: { type: string }
+            docs: { type: string, format: uri }
+            items:
+              type: array
+              items:
+                type: object
+                required: [index, code, message]
+                properties:
+                  index: { type: integer, description: "The email's position in `emails`, from 0." }
+                  code: { $ref: "#/components/schemas/ErrorCode" }
+                  field: { type: string }
+                  message: { type: string }
+
+    WebhookEventBase:
+      type: object
+      required: [id, type, created_at, data]
+      properties:
+        id: { type: string, description: "Same as the `webhook-id` header.", examples: [evt_2b7k9x4m1q8w3n5p6r0s2t4v] }
+        created_at: { type: string, format: date-time, description: When it happened. Order events by it. }
+        test: { type: boolean, description: "Present and true on a sample from Send test event (no real email behind it). Whether a real email used a test key is `data.test`." }
+
+    EmailWebhookEvent:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEventBase"
+        - type: object
+          required: [type, data]
+          properties:
+            type:
+              type: string
+              enum:
+                - email.sent
+                - email.delivered
+                - email.delivery_delayed
+                - email.bounced
+                - email.complained
+                - email.failed
+                - email.suppressed
+                - email.expired
+                - email.canceled
+            data:
+              type: object
+              required: [email_id, from, to, subject, created_at, tags, test]
+              properties:
+                email_id: { type: string }
+                from: { type: string }
+                to: { type: array, items: { type: string } }
+                subject: { type: string }
+                created_at: { type: string, format: date-time, description: When the email was accepted. }
+                tags: { $ref: "#/components/schemas/Tags" }
+                test:
+                  type: boolean
+                  description: |
+                    Sent with a test key — the same as `test` on
+                    `GET /v1/emails/{id}`. Not the top-level `test`, which
+                    marks a sample from Send test event.
+                recipient:
+                  type: string
+                  description: |
+                    The address this event is about — on `email.delivered`,
+                    `email.delivery_delayed`, `email.bounced`,
+                    `email.complained` and `email.suppressed`, which come once
+                    per recipient. May be a `cc` or `bcc` address.
+                  examples: [customer@example.com]
+                bounce:
+                  $ref: "#/components/schemas/BounceDetails"
+                  description: "`email.bounced` only."
+                suppressed:
+                  type: object
+                  description: "`email.suppressed` only."
+                  properties:
+                    reason: { type: string, enum: [previous_bounce, previous_complaint] }
+                failed:
+                  type: object
+                  description: "`email.failed` only. Refunded."
+                  properties:
+                    reason: { type: string, description: "Why, in words.", examples: ["daringaming.com is no longer verified."] }
+                expired:
+                  type: object
+                  description: "`email.expired` only. Refunded."
+                  properties:
+                    reason:
+                      type: string
+                      description: Why, in words — its `expires_at` passed, or it waited 3 days while sending was paused.
+                      examples: ["It could not leave before its expires_at, so it was dropped."]
+      examples:
+        - id: evt_2b7k9x4m1q8w3n5p6r0s2t4v
+          type: email.delivered
+          created_at: "2026-11-16T09:00:02.400Z"
+          data:
+            email_id: em_8f2k1x9q4w7m3n5p6r0s2t4v
+            from: Darin Game <orders@daringaming.com>
+            to: [customer@example.com]
+            subject: "Your order #4821"
+            created_at: "2026-11-16T09:00:00.120Z"
+            tags: { type: order_confirmation }
+            test: false
+            recipient: customer@example.com
+
+    DomainWebhookEvent:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEventBase"
+        - type: object
+          required: [type, data]
+          properties:
+            type: { type: string, enum: [domain.verified, domain.failed] }
+            data:
+              type: object
+              required: [domain]
+              properties:
+                domain: { type: string, examples: [daringaming.com] }
+
+    AccountWebhookEvent:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEventBase"
+        - type: object
+          required: [type, data]
+          properties:
+            type: { type: string, enum: [account.paused, account.resumed, balance.low] }
+            data:
+              type: object
+              description: "`account.paused`: `code` and `reason`. `account.resumed`: empty. `balance.low`: `used_percent` and `emails_left`."
+              properties:
+                code:
+                  type: string
+                  enum: [manual, bounce_rate, complaint_rate, volume_spike, not_transactional, provider_paused, reputation_finding]
+                  description: "Why sending was paused (`account.paused`): our team, too many hard bounces, spam complaints, mail that looks like marketing, or our delivery provider's own reputation checks (`provider_paused`, `reputation_finding`). `volume_spike` no longer pauses sending; only events from before 2026-11-17 carry it."
+                reason: { type: string, description: "The same, in words, with our numbers when we have them (`account.paused`)." }
+                used_percent: { type: integer, enum: [80, 100], description: "`balance.low`: 80 when 20% or less is left since your last top-up, 100 when nothing is left." }
+                emails_left: { type: integer, description: "`balance.low`: plan emails plus usable credits left." }
+
+  responses:
+    BadRequest:
+      description: "`invalid_json`, `validation_error` (with `field`) or `invalid_idempotency_key`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: validation_error
+              field: to
+              message: '"ara@" is not an email address.'
+              docs: https://charchy.krd/docs/errors#validation_error
+    Unauthorized:
+      description: "`missing_api_key` or `invalid_api_key` (unknown or revoked)."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: invalid_api_key
+              message: This API key is unknown or was revoked.
+              docs: https://charchy.krd/docs/errors#invalid_api_key
+    InsufficientBalance:
+      description: "`insufficient_balance` — plan emails and credits are both used up. Don't retry automatically."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: insufficient_balance
+              message: This month's plan emails and your credits are used up.
+              docs: https://charchy.krd/docs/errors#insufficient_balance
+    SendForbidden:
+      description: |
+        `restricted_api_key`, `domain_not_verified`, `sender_not_allowed`,
+        `not_approved` or `sending_paused`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: domain_not_verified
+              message: daringaming.com is not verified in this workspace.
+              docs: https://charchy.krd/docs/errors#domain_not_verified
+    RestrictedKey:
+      description: "`restricted_api_key` — a sending-only key on a read endpoint."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: restricted_api_key
+              message: This key can only send emails.
+              docs: https://charchy.krd/docs/errors#restricted_api_key
+    NotFound:
+      description: "`not_found`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: not_found
+              message: No email with this id in your workspace.
+              docs: https://charchy.krd/docs/errors#not_found
+    IdempotencyConflict:
+      description: "`idempotency_conflict` (same key, different body) or `idempotency_in_flight` (retry shortly)."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: idempotency_conflict
+              message: This Idempotency-Key was used with a different body.
+              docs: https://charchy.krd/docs/errors#idempotency_conflict
+    PayloadTooLarge:
+      description: "`payload_too_large` — body over 5 MB, or `html`/`text` over 512 KB."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: payload_too_large
+              message: The request body is over 5 MB.
+              docs: https://charchy.krd/docs/errors#payload_too_large
+    Unprocessable:
+      description: "`invalid_attachment`, `too_many_recipients` or `schedule_out_of_range`."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: schedule_out_of_range
+              field: scheduled_at
+              message: scheduled_at is more than 30 days ahead.
+              docs: https://charchy.krd/docs/errors#schedule_out_of_range
+    TooManyRequests:
+      description: "`rate_limit_exceeded` (over 10 requests a second) or `daily_limit_reached`. Retry after `Retry-After`."
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+        ratelimit-limit: { $ref: "#/components/headers/RateLimitLimit" }
+        ratelimit-remaining: { $ref: "#/components/headers/RateLimitRemaining" }
+        ratelimit-reset: { $ref: "#/components/headers/RateLimitReset" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: rate_limit_exceeded
+              message: More than 10 requests a second.
+              docs: https://charchy.krd/docs/errors#rate_limit_exceeded
+    InternalError:
+      description: "`internal_error`. Retry with backoff and the same Idempotency-Key."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    SendingUnavailable:
+      description: "`sending_unavailable` — sending is halted platform-wide for a while. Retry with backoff."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

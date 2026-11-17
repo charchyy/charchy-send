@@ -1,0 +1,89 @@
+{
+  "name": "@charchy/send",
+  "version": "0.1.0",
+  "description": "The official TypeScript SDK for Charchy Send — transactional email from your own domain. Zero dependencies; Node 18+, Bun, Deno, Vercel Edge and Cloudflare Workers.",
+  "license": "MIT",
+  "author": "Charchy <support@charchy.krd> (https://charchy.krd)",
+  "homepage": "https://charchy.krd/docs/sdks/node",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/charchyy/charchy-send.git"
+  },
+  "bugs": {
+    "url": "https://github.com/charchyy/charchy-send/issues",
+    "email": "support@charchy.krd"
+  },
+  "keywords": [
+    "email",
+    "transactional-email",
+    "email-api",
+    "charchy",
+    "charchy-send",
+    "namabar",
+    "standard-webhooks",
+    "react-email"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "generate": "openapi-typescript openapi/openapi.yaml --output src/generated/openapi.ts",
+    "generate:check": "openapi-typescript openapi/openapi.yaml --output src/generated/openapi.ts --check",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test && node scripts/check-readme.mjs",
+    "test": "vitest run",
+    "build": "tsdown",
+    "smoke": "node scripts/smoke.mjs",
+    "lint:package": "publint --strict && attw --pack .",
+    "prepublishOnly": "pnpm run generate:check && pnpm run typecheck && pnpm run test && pnpm run build"
+  },
+  "peerDependencies": {
+    "@react-email/render": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@react-email/render": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@react-email/render": "2.3.1",
+    "@types/node": "^24.10.4",
+    "@types/react": "19.3.0",
+    "openapi-typescript": "7.13.0",
+    "publint": "0.3.25",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tsdown": "0.23.7",
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.0"
+  },
+  "packageManager": "pnpm@11.17.0+sha512.cca3cea332ad254bb84145f966d19f4879615210346fc92c79a047f23a0d7b3cca3c3792f0076ba1f1831d277efbcf0a9119b31a9a60eca7fb3d6231f331ef72"
+}

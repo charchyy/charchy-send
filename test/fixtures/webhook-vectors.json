@@ -1,0 +1,42 @@
+{
+  "note": "Signed by Charchy Send's own webhook signer on 2026-11-17. Secrets are test-only. Verify with the clock at webhook-timestamp (1800000000).",
+  "vectors": [
+    {
+      "name": "one secret",
+      "secrets": [
+        "whsec_Y2hhcmNoeS1zZW5kIHRlc3QgdmVjdG9yOiBvbmUuLi4="
+      ],
+      "body": "{\"id\":\"evt_2b7k9x4m1q8w3n5p6r0s2t4v\",\"type\":\"email.delivered\",\"created_at\":\"2026-11-16T09:00:02.400Z\",\"data\":{\"email_id\":\"em_8f2k1x9q4w7m3n5p6r0s2t4v\",\"from\":\"Darin Game <orders@daringaming.com>\",\"to\":[\"customer@example.com\"],\"subject\":\"Your order #4821\",\"created_at\":\"2026-11-16T09:00:00.120Z\",\"tags\":{\"type\":\"order_confirmation\"},\"test\":false,\"recipient\":\"customer@example.com\"}}",
+      "headers": {
+        "webhook-id": "evt_2b7k9x4m1q8w3n5p6r0s2t4v",
+        "webhook-timestamp": "1800000000",
+        "webhook-signature": "v1,OX66Porw2PwuAjtAQ8yAqU/9RphD/6a/7U12cVwFB00="
+      }
+    },
+    {
+      "name": "Kurdish body",
+      "secrets": [
+        "whsec_Y2hhcmNoeS1zZW5kIHRlc3QgdmVjdG9yOiBvbmUuLi4="
+      ],
+      "body": "{\"id\":\"evt_kurdish\",\"type\":\"email.sent\",\"created_at\":\"2026-11-16T09:00:01.000Z\",\"data\":{\"email_id\":\"em_k\",\"from\":\"دارین گەیم <orders@daringaming.com>\",\"to\":[\"customer@example.com\"],\"subject\":\"داواکارییەکەت گەیشت\",\"created_at\":\"2026-11-16T09:00:00.000Z\",\"tags\":{},\"test\":true}}",
+      "headers": {
+        "webhook-id": "evt_kurdish",
+        "webhook-timestamp": "1800000000",
+        "webhook-signature": "v1,6wuCt37jkvVBGIj4RHsLVjeem4EEKlZC9nGAy1p+AQE="
+      }
+    },
+    {
+      "name": "rotation: two secrets sign",
+      "secrets": [
+        "whsec_Y2hhcmNoeS1zZW5kIHRlc3QgdmVjdG9yOiBvbmUuLi4=",
+        "whsec_Y2hhcmNoeS1zZW5kIHRlc3QgdmVjdG9yOiB0d28uLi4="
+      ],
+      "body": "{\"id\":\"evt_2b7k9x4m1q8w3n5p6r0s2t4v\",\"type\":\"email.delivered\",\"created_at\":\"2026-11-16T09:00:02.400Z\",\"data\":{\"email_id\":\"em_8f2k1x9q4w7m3n5p6r0s2t4v\",\"from\":\"Darin Game <orders@daringaming.com>\",\"to\":[\"customer@example.com\"],\"subject\":\"Your order #4821\",\"created_at\":\"2026-11-16T09:00:00.120Z\",\"tags\":{\"type\":\"order_confirmation\"},\"test\":false,\"recipient\":\"customer@example.com\"}}",
+      "headers": {
+        "webhook-id": "evt_2b7k9x4m1q8w3n5p6r0s2t4v",
+        "webhook-timestamp": "1800000000",
+        "webhook-signature": "v1,OX66Porw2PwuAjtAQ8yAqU/9RphD/6a/7U12cVwFB00= v1,A3BFIyUuqPq0XfA4L05m10VnlIRj1G2HBC2gl/GirOs="
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# gitleaks: the default rules, minus two public test fixtures under test/ —
+# the Standard Webhooks spec's own published example secret, and a dummy
+# key made of the repeated digits 0123456789abcdef.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public test fixtures"
+condition = "AND"
+paths = ['''^test/''']
+regexes = ['''whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw''', '''^(0123456789abcdef)+[0-9a-f]*$''']

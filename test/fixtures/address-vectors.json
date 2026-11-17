@@ -1,0 +1,68 @@
+{
+  "note": "How the Charchy Send API reads each address the SDK writes from { name, email } (recorded from the API's own parser on 2026-11-17).",
+  "vectors": [
+    {
+      "name": "Darin Game",
+      "email": "orders@daringaming.com",
+      "written": "Darin Game <orders@daringaming.com>",
+      "apiReadsName": "Darin Game",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "Ara, Karim",
+      "email": "orders@daringaming.com",
+      "written": "\"Ara, Karim\" <orders@daringaming.com>",
+      "apiReadsName": "Ara, Karim",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "Shno \"the boss\" \\ Ali",
+      "email": "orders@daringaming.com",
+      "written": "\"Shno \\\"the boss\\\" \\\\ Ali\" <orders@daringaming.com>",
+      "apiReadsName": "Shno \"the boss\" \\ Ali",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "دارین گەیم",
+      "email": "orders@daringaming.com",
+      "written": "دارین گەیم <orders@daringaming.com>",
+      "apiReadsName": "دارین گەیم",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "شركة دارين",
+      "email": "orders@daringaming.com",
+      "written": "شركة دارين <orders@daringaming.com>",
+      "apiReadsName": "شركة دارين",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "Support (24/7)",
+      "email": "orders@daringaming.com",
+      "written": "\"Support (24/7)\" <orders@daringaming.com>",
+      "apiReadsName": "Support (24/7)",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "a.b@c; d:e [f]",
+      "email": "orders@daringaming.com",
+      "written": "\"a.b@c; d:e [f]\" <orders@daringaming.com>",
+      "apiReadsName": "a.b@c; d:e [f]",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "O'Brien & Sons",
+      "email": "orders@daringaming.com",
+      "written": "O'Brien & Sons <orders@daringaming.com>",
+      "apiReadsName": "O'Brien & Sons",
+      "apiReadsEmail": "orders@daringaming.com"
+    },
+    {
+      "name": "  Spaced  Name  ",
+      "email": "orders@daringaming.com",
+      "written": "Spaced  Name <orders@daringaming.com>",
+      "apiReadsName": "Spaced  Name",
+      "apiReadsEmail": "orders@daringaming.com"
+    }
+  ]
+}
