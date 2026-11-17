@@ -23,11 +23,10 @@ describe("new CharchySend()", () => {
     expect(calls[0]!.headers.authorization).toBe(`Bearer ${TEST_KEY}`)
   })
 
-  it("throws a clear error for a missing key or one that isn't a Charchy Send key", () => {
+  it("never needs the key to be created; bad options still throw at once", () => {
     vi.stubEnv("CHARCHY_SEND_KEY", "")
-    expect(() => new CharchySend()).toThrow(/Missing API key/)
-    expect(() => new CharchySend("re_123456789")).toThrow(/chy_live_ or chy_test_/)
-    expect(() => new CharchySend(`chy_sync_${"a".repeat(64)}`)).toThrow(/chy_live_ or chy_test_/)
+    expect(() => new CharchySend()).not.toThrow()
+    expect(() => new CharchySend("re_123456789")).not.toThrow()
     expect(() => new CharchySend(TEST_KEY, { maxRetries: -1 })).toThrow(/maxRetries/)
   })
 

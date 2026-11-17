@@ -18,12 +18,14 @@
  * the email — and the key — to wherever it points. The API never redirects.
  */
 
-import { CharchySendError, type ApiErrorCode, type BatchErrorItem, type ResponseHeaders, type ResponseMeta, type Result } from "./errors.js"
+import type { KeyResolution } from "./apiKey.js"
+import { CharchySendError, localFailure, type ApiErrorCode, type BatchErrorItem, type ResponseHeaders, type ResponseMeta, type Result } from "./errors.js"
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>
 
 export type TransportConfig = {
-  apiKey: string
+  /** The key, resolved per request (see ./apiKey.ts). */
+  resolveKey: () => KeyResolution
   baseUrl: string
   maxRetries: number
   timeoutMs: number
@@ -58,10 +60,13 @@ type Attempt =
   | { kind: "network"; error: unknown; timedOut: boolean; aborted: boolean }
 
 export async function callApi(config: TransportConfig, call: ApiCall): Promise<Result<unknown>> {
+  const resolved = config.resolveKey()
+  if (!resolved.ok) return localFailure(resolved.error)
+  const apiKey = resolved.key
   const url = buildUrl(config.baseUrl, call.path, call.query)
   for (let attempt = 0; ; attempt++) {
-    const outcome = await attemptOnce(config, call, url)
-    const result = toResult(outcome, config.apiKey)
+    const outcome = await attemptOnce(config, apiKey, call, url)
+    const result = toResult(outcome, apiKey)
     if (!result.error || attempt >= config.maxRetries) return result
 
     const waitMs = retryDelayMs(outcome, result.error, call.retry, attempt)
@@ -79,7 +84,7 @@ export function buildUrl(baseUrl: string, path: string, query?: Record<string, s
   return url.toString()
 }
 
-async function attemptOnce(config: TransportConfig, call: ApiCall, url: string): Promise<Attempt> {
+async function attemptOnce(config: TransportConfig, apiKey: string, call: ApiCall, url: string): Promise<Attempt> {
   const controller = new AbortController()
   let timedOut = false
   const timer = setTimeout(() => {
@@ -91,7 +96,7 @@ async function attemptOnce(config: TransportConfig, call: ApiCall, url: string):
   call.signal?.addEventListener("abort", forwardAbort, { once: true })
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${config.apiKey}`,
+    Authorization: `Bearer ${apiKey}`,
     Accept: "application/json",
     "User-Agent": config.userAgent,
   }

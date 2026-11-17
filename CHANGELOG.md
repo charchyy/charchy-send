@@ -6,7 +6,7 @@
 
 The first version, for the Charchy Send v1 API.
 
-- `new CharchySend(apiKey?, { baseUrl, maxRetries, timeoutMs, fetch, userAgent })`; the key defaults to `CHARCHY_SEND_KEY` and must be a well-formed `chy_live_` / `chy_test_` key. `send.mode` says which.
+- `new CharchySend(apiKey?, { baseUrl, maxRetries, timeoutMs, fetch, userAgent })`. The key (the argument, else `CHARCHY_SEND_KEY`) is read on each request, never at construction, so a client at the top of a module is safe in `next build` and secret-less deploys; a missing or malformed key comes back as `missing_api_key` / `invalid_api_key` with nothing sent. `send.mode` is `"test"`, `"live"`, or `null` while there is no valid key. The webhook secret is likewise read per request.
 - `emails.send`, `emails.batch`, `emails.get`, `emails.list`, `emails.listAll` (async iterator), `emails.update`, `emails.cancel`, `images.upload`, `usage.get` — each resolving to `{ data, error, headers, meta }`; `unwrap()` for exceptions. `meta` parses the request id, rate limit and emails remaining.
 - `emails.waitFor(id, { until })` and `send.test.address(outcome, label)` for end-to-end tests against the magic addresses.
 - `webhooks.handler({ "email.bounced": … })`: a complete `Request → Response` endpoint; `webhooks.verify` / `verifyWebhook` for your own routes. Standard Webhooks, Web Crypto, typed events.

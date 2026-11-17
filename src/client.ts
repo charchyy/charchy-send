@@ -1,6 +1,7 @@
 import { Emails } from "./resources/emails.js"
 import { Images, UsageResource } from "./resources/images-and-usage.js"
-import { INSPECT, readEnv, warnIfBrowser } from "./runtime.js"
+import { resolveApiKey, type KeyMode } from "./apiKey.js"
+import { INSPECT, warnIfBrowser } from "./runtime.js"
 import { testAddress } from "./testing.js"
 import { maskKey, type FetchLike, type TransportConfig } from "./transport.js"
 import type { SimulatedOutcome } from "./types.js"
@@ -20,15 +21,12 @@ export type CharchySendOptions = {
   userAgent?: string
 }
 
-/** `test` for a `chy_test_` key (never sends, never charges), `live` for `chy_live_`. */
-export type KeyMode = "test" | "live"
+export type { KeyMode } from "./apiKey.js"
 
 export const DEFAULT_BASE_URL = "https://api.charchy.krd"
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_TIMEOUT_MS = 600_000
-/** The exact shape of a Charchy Send key. */
-const KEY_PATTERN = /^chy_(live|test)_[0-9a-f]{64}$/
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
 
 function configError(message: string): Error {
@@ -58,6 +56,11 @@ function readBaseUrl(raw: string): string {
  *   const { data, error } = await send.emails.send({ … })
  *
  * API methods never throw: they resolve to `{ data, error, headers, meta }`.
+ * Creating the client never needs the key: it is read (from the argument,
+ * else `CHARCHY_SEND_KEY`) when a request is made, so a client at the top of
+ * a module is safe in `next build` and deploys without runtime secrets. A
+ * missing or malformed key comes back from the first call as
+ * `missing_api_key` / `invalid_api_key`, with nothing sent.
  * The key lives in a private field: logging the client shows only `chy_live_…1a2b`.
  */
 export class CharchySend {
@@ -65,29 +68,17 @@ export class CharchySend {
   readonly images: Images
   readonly usage: UsageResource
   readonly webhooks: Webhooks
-  /** `"test"` or `"live"`, from the key. */
-  readonly mode: KeyMode
   /** Test-mode helpers. */
   readonly test: {
     /** A magic address with a known outcome: `send.test.address("bounced", "signup-42")` → `"bounced+signup-42@sim.charchy.krd"`. */
     address(outcome: SimulatedOutcome, label?: string): string
   }
-  readonly #maskedKey: string
+  readonly #explicitKey: string | undefined
   readonly #baseUrl: string
 
   constructor(apiKey?: string, options: CharchySendOptions = {}) {
     warnIfBrowser()
-    const key = (apiKey ?? readEnv("CHARCHY_SEND_KEY"))?.trim()
-    if (!key) {
-      throw configError("Missing API key. Pass it to new CharchySend(key), or set CHARCHY_SEND_KEY. Create keys under API keys in the Charchy dashboard.")
-    }
-    const match = KEY_PATTERN.exec(key)
-    if (!match) {
-      // Never echo any of it: a wrong secret pasted here is still a secret.
-      throw configError(
-        `That is not a Charchy Send API key: expected chy_live_ or chy_test_ followed by 64 lowercase hex characters (73 in all); got ${key.length} characters.`
-      )
-    }
+    // Options are code, checked now; the key is environment, checked per request (./apiKey.ts).
     const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES
     if (!Number.isInteger(maxRetries) || maxRetries < 0 || maxRetries > 10) throw configError("maxRetries must be a whole number from 0 to 10.")
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -98,11 +89,10 @@ export class CharchySend {
       throw configError("userAgent must be 1–200 printable ASCII characters (no line breaks).")
     }
 
-    this.mode = match[1] === "live" ? "live" : "test"
-    this.#maskedKey = maskKey(key)
+    this.#explicitKey = apiKey
     this.#baseUrl = readBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL)
     const config: TransportConfig = {
-      apiKey: key,
+      resolveKey: () => resolveApiKey(apiKey),
       baseUrl: this.#baseUrl,
       maxRetries,
       timeoutMs,
@@ -117,13 +107,24 @@ export class CharchySend {
     this.test = { address: testAddress }
   }
 
+  /**
+   * `"test"` or `"live"` from the key — read now, like a request would — or
+   * `null` while there is no valid key (none passed and `CHARCHY_SEND_KEY`
+   * unset, or one that isn't shaped like a key).
+   */
+  get mode(): KeyMode | null {
+    const resolved = resolveApiKey(this.#explicitKey)
+    return resolved.ok ? resolved.mode : null
+  }
+
   /** What `console.log(send)` and `util.inspect(send)` show: never the key. */
   [INSPECT](): object {
     return this.toJSON()
   }
 
-  /** What `JSON.stringify(send)` shows: never the key. */
-  toJSON(): { mode: KeyMode; key: string; baseUrl: string } {
-    return { mode: this.mode, key: this.#maskedKey, baseUrl: this.#baseUrl }
+  /** What `JSON.stringify(send)` shows: never the key — its masked form, or null while there is none. */
+  toJSON(): { mode: KeyMode | null; key: string | null; baseUrl: string } {
+    const resolved = resolveApiKey(this.#explicitKey)
+    return { mode: resolved.ok ? resolved.mode : null, key: resolved.ok ? maskKey(resolved.key) : null, baseUrl: this.#baseUrl }
   }
 }

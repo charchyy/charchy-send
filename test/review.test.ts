@@ -48,22 +48,27 @@ describe("H1: the key never shows in logs", () => {
 })
 
 describe("H2: keys, user agents and idempotency keys are checked before anything is sent", () => {
-  it("trims the key and requires the API's exact format", () => {
+  it("trims the key and requires the API's exact format: a malformed key is a local invalid_api_key, nothing sent", async () => {
     expect(new CharchySend(`  ${TEST_KEY}\n`).mode).toBe("test")
-    for (const bad of [`${TEST_KEY.slice(0, -1)}\n`, `chy_live_${"A".repeat(64)}`, `chy_live_${"a".repeat(63)}`, `chy_live_${"a".repeat(32)}\r\n${"a".repeat(32)}`, `chy_live_SECRET​SECRET`]) {
-      expect(() => new CharchySend(bad)).toThrow(/64 lowercase hex/)
+    const { fetch } = fakeFetch()
+    for (const bad of [`${TEST_KEY.slice(0, -1)}\n`, `chy_live_${"A".repeat(64)}`, `chy_live_${"a".repeat(63)}`, `chy_live_${"a".repeat(32)}\r\n${"a".repeat(32)}`, `chy_live_SECRET​SECRET`, `chy_sync_${"a".repeat(64)}`]) {
+      const send = new CharchySend(bad, { fetch })
+      expect(send.mode).toBeNull()
+      const result = await send.usage.get()
+      expect(result.error).toMatchObject({ code: "invalid_api_key", statusCode: null, docs: "https://charchy.krd/docs/errors#invalid_api_key" })
+      expect(result.error?.message).toMatch(/64 lowercase hex/)
+      expect(result.meta).toBeNull()
     }
+    expect(fetch).not.toHaveBeenCalled()
   })
 
-  it("L1: the refusal never echoes the input — only what was expected and the length", () => {
-    let message = ""
-    try {
-      new CharchySend("whsec_ABCDEFGHIJKL")
-    } catch (error) {
-      message = (error as Error).message
-    }
-    expect(message).toContain("got 18 characters")
-    expect(message).not.toMatch(/whsec|ABCD/)
+  it("L1: the refusal never echoes the input — only what was expected and the length", async () => {
+    const send = new CharchySend("whsec_ABCDEFGHIJKL", { fetch: fakeFetch().fetch })
+    const { error } = await send.emails.send({ from: "a@x.example", to: "b@x.example", subject: "s", text: "t" })
+    expect(error?.message).toContain("got 18 characters")
+    expect(error?.message).not.toMatch(/whsec|ABCD/)
+    expect(inspect(send)).not.toMatch(/whsec|ABCD/)
+    expect(JSON.parse(JSON.stringify(send))).toMatchObject({ mode: null, key: null })
   })
 
   it("refuses a user agent with a line break", () => {
@@ -185,5 +190,50 @@ describe("L4: timeoutMs", () => {
       expect(() => new CharchySend(TEST_KEY, { timeoutMs })).toThrow(/timeoutMs/)
     }
     expect(() => new CharchySend(TEST_KEY, { timeoutMs: 600_000 })).not.toThrow()
+  })
+})
+
+describe("the key is read when a request is made, not when the client is created", () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("a client created with no key at all (as at the top of a module, during a build) doesn't throw", () => {
+    vi.stubEnv("CHARCHY_SEND_KEY", "")
+    let send: CharchySend | undefined
+    expect(() => {
+      send = new CharchySend()
+    }).not.toThrow()
+    expect(send?.mode).toBeNull()
+    expect(inspect(send)).toContain("key: null")
+  })
+
+  it("the first call without a key is a local missing_api_key: no fetch, no throw", async () => {
+    vi.stubEnv("CHARCHY_SEND_KEY", "")
+    const { fetch } = fakeFetch()
+    const send = new CharchySend(undefined, { fetch })
+    const result = await send.emails.send({ from: "a@x.example", to: "b@x.example", subject: "s", text: "t" })
+    expect(result).toMatchObject({ data: null, headers: null, meta: null })
+    expect(result.error).toMatchObject({ code: "missing_api_key", statusCode: null, docs: "https://charchy.krd/docs/errors#missing_api_key" })
+    await expect(send.emails.listAll().next()).rejects.toMatchObject({ code: "missing_api_key" })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("picks up CHARCHY_SEND_KEY set after the client was created", async () => {
+    vi.stubEnv("CHARCHY_SEND_KEY", "")
+    const { fetch, calls } = fakeFetch({ json: { plan: null } })
+    const send = new CharchySend(undefined, { fetch })
+    expect(send.mode).toBeNull()
+    vi.stubEnv("CHARCHY_SEND_KEY", LIVE_KEY)
+    expect(send.mode).toBe("live")
+    expect((await send.usage.get()).data).toEqual({ plan: null })
+    expect(calls[0]!.headers.authorization).toBe(`Bearer ${LIVE_KEY}`)
+    expect(leaks(inspect(send))).toBe(false)
+    expect(inspect(send)).toContain("chy_live_…cdef")
+  })
+
+  it("an explicit key wins over the environment", async () => {
+    vi.stubEnv("CHARCHY_SEND_KEY", LIVE_KEY)
+    const { fetch, calls } = fakeFetch({ json: { plan: null } })
+    await new CharchySend(TEST_KEY, { fetch }).usage.get()
+    expect(calls[0]!.headers.authorization).toBe(`Bearer ${TEST_KEY}`)
   })
 })

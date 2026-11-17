@@ -19,7 +19,7 @@ CHARCHY_SEND_KEY=chy_test_…
 ```ts
 import { CharchySend } from "@charchy/send"
 
-const send = new CharchySend() // reads CHARCHY_SEND_KEY
+const send = new CharchySend() // reads CHARCHY_SEND_KEY when a request is made
 
 const { data, error } = await send.emails.send(
   {
@@ -34,6 +34,8 @@ const { data, error } = await send.emails.send(
 if (error) throw error // a CharchySendError
 console.log(data.id) // "em_…"
 ```
+
+Creating the client never needs the key — it is read on each request — so `new CharchySend()` at the top of a module is safe in `next build` and in deploys that load code without your secrets. With no key, a call returns `missing_api_key` (nothing sent); a value that isn't shaped like a key, `invalid_api_key`.
 
 Keys belong on your server. The SDK warns once if it runs in a browser, and the API sends no CORS headers anyway. The key lives in a private field: `console.log(send)` shows `{ mode: 'test', key: 'chy_test_…1a2b', baseUrl: … }`, never the key.
 
@@ -73,7 +75,7 @@ const { id } = await send.emails.send({ from, to, subject: "Receipt", text: "Tha
 | `retryAfterSeconds` | `Retry-After`, when the API sent one |
 | `items` | A refused batch: every invalid email as `{ index, code, field, message }` |
 
-Your input is checked before anything is sent — addresses with line breaks, an `expiresAt` already past or before `scheduledAt`, a malformed idempotency key, an id that isn't `em_…` — and refused as `validation_error` with `field` and `statusCode: null`.
+Your input is checked before anything is sent — addresses with line breaks, an `expiresAt` already past or before `scheduledAt`, a malformed idempotency key, an id that isn't `em_…` — and refused as `validation_error` with `field` and `statusCode: null`. A missing or malformed key is refused the same way, as `missing_api_key` or `invalid_api_key`.
 
 ## Retries and idempotency
 
@@ -294,7 +296,7 @@ Dedupe by `event.id` (the same on every retry) and order by `event.createdAt`. E
 ## Test mode
 
 ```ts
-console.log(send.mode) // "test" for a chy_test_ key, "live" for chy_live_
+console.log(send.mode) // "test" for a chy_test_ key, "live" for chy_live_, null while there is no valid key
 
 send.test.address("delivered") // "delivered@sim.charchy.krd"
 send.test.address("bounced", "signup-42") // "bounced+signup-42@sim.charchy.krd"
@@ -316,7 +318,7 @@ const client = new CharchySend(process.env.CHARCHY_SEND_KEY, {
 })
 ```
 
-The key must be `chy_live_` or `chy_test_` and 64 hex characters; anything else throws at once, without echoing what you passed. Redirects are never followed. Every method also takes `{ signal }` (an `AbortSignal`) to cancel it and its retries.
+The key must be `chy_live_` or `chy_test_` and 64 hex characters, checked on each request: a missing key returns `missing_api_key` and anything else `invalid_api_key` (never echoing what you passed), with nothing sent. Options are code, so a bad option throws at once. Redirects are never followed. Every method also takes `{ signal }` (an `AbortSignal`) to cancel it and its retries.
 
 ## Runtimes
 

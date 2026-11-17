@@ -178,6 +178,17 @@ describe("webhooks.handler", () => {
     const unconfigured = webhookHandler({}, { onError: () => {} })
     expect((await unconfigured(await request(bounced, secret))).status).toBe(500)
   })
+
+  it("reads CHARCHY_WEBHOOK_SECRET per request: a handler made before the secret is set works once it is", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(NOW * 1000)
+    vi.stubEnv("CHARCHY_WEBHOOK_SECRET", "")
+    const handle = webhookHandler({}, { onError: () => {} }) // created at module load, no secret yet
+    const secret = newWebhookSecret()
+    expect((await handle(await request(bounced, secret))).status).toBe(500)
+    vi.stubEnv("CHARCHY_WEBHOOK_SECRET", secret)
+    expect((await handle(await request(bounced, secret))).status).toBe(204)
+  })
 })
 
 describe("address objects as the API reads them", () => {
