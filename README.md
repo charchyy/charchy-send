@@ -6,6 +6,10 @@ Zero dependencies. Node 18+, Bun, Deno, Vercel Edge and Cloudflare Workers. ESM 
 
 ```bash
 npm install @charchy/send
+# or
+pnpm add @charchy/send
+yarn add @charchy/send
+bun add @charchy/send
 ```
 
 ## Quickstart
