@@ -1,6 +1,6 @@
 {
   "name": "@charchy/send",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The official TypeScript SDK for Charchy Send — transactional email from your own domain. Zero dependencies; Node 18+, Bun, Deno, Vercel Edge and Cloudflare Workers.",
   "license": "MIT",
   "author": "Charchy <support@charchy.krd> (https://charchy.krd)",

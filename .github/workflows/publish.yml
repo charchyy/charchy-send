@@ -6,14 +6,19 @@
 #   build    contents: read only. Checks the tagged commit is on main and the
 #            tag matches package.json, runs every check without a cache,
 #            packs the tarball and uploads it as an artifact.
-#   publish  id-token: write, behind the `npm` environment (a required
-#            reviewer approves each release). Downloads that tarball and runs
-#            `npm publish --provenance` — no checkout, no install, no project
-#            code.
+#   publish  id-token: write, behind the `npm` environment. Downloads that
+#            tarball and runs `npm stage publish --provenance` — no checkout,
+#            no install, no project code.
 #
-# npm Trusted Publishing (OIDC): no NPM_TOKEN secret. Needs npm 11.5.1+ (Node
-# 24 ships it) and a GitHub-hosted runner; provenance needs this repository to
-# be public.
+# Staged publishing: CI can only STAGE a version. Nothing reaches the registry
+# until a maintainer approves it on npmjs.com (Staged Packages tab) or with
+# `npm stage approve <id>`, with 2FA — so a leaked CI credential or a hijacked
+# workflow cannot ship a version on its own. The Trusted Publisher leaves
+# "Allow npm publish" unticked.
+#
+# npm Trusted Publishing (OIDC): no NPM_TOKEN secret. Staging needs npm
+# 11.15.0+ and Node 22.14+, and a GitHub-hosted runner; provenance needs this
+# repository to be public.
 #
 # Every action is pinned to a full commit SHA (its release in the comment).
 name: Publish
@@ -107,18 +112,25 @@ jobs:
         with:
           node-version: 24
 
-      - name: npm can use Trusted Publishing (11.5.1 or later)
+      - name: npm can stage with Trusted Publishing (11.15.0 or later)
         run: |
           npm --version
-          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)" \
-            || { echo "::error::npm $(npm --version) is too old for Trusted Publishing."; exit 1; }
+          node -e "const [a,b]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&b>=15)?0:1)" "$(npm --version)" \
+            || { echo "::error::npm $(npm --version) is too old for staged publishing (needs 11.15.0)."; exit 1; }
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: package-tarball
           path: ${{ runner.temp }}/pack
 
-      - name: Publish
+      - name: Stage on npm
         env:
           TARBALL: ${{ runner.temp }}/pack/charchy-send-${{ needs.build.outputs.version }}.tgz
-        run: npm publish "$TARBALL" --provenance --access public
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          npm stage publish "$TARBALL" --provenance --access public
+          {
+            echo "### @charchy/send@${VERSION} is staged, not published"
+            echo
+            echo "Approve it with 2FA: npmjs.com → @charchy/send → **Staged Packages** → **Approve**, or \`npm stage list @charchy/send\` then \`npm stage approve <id>\`."
+          } >> "$GITHUB_STEP_SUMMARY"

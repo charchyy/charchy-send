@@ -5,7 +5,7 @@
 `.github/workflows/publish.yml` publishes from a `v*` tag. Set these before the first CI release.
 
 1. **GitHub environment `npm`** — Settings → Environments → New environment `npm`:
-   - **Required reviewers:** at least one owner. Every publish waits for that approval.
+   - **Required reviewers:** at least one owner. The staging job waits for that approval.
    - **Deployment branches and tags:** *Selected branches and tags* → add the tag pattern `v*`.
    - No secrets: publishing uses OIDC.
 2. **Tag ruleset** — Settings → Rules → Rulesets → New tag ruleset:
@@ -14,9 +14,9 @@
    - Bypass list: repository admins only.
 3. **npm Trusted Publisher** — on npmjs.com, package `@charchy/send` → Settings → Trusted publishing → GitHub Actions:
    - Organization or user `charchyy` · Repository `charchy-send` · Workflow filename `publish.yml` · Environment name `npm`
-   - Allow `npm publish`.
-   - npm sets this up on an existing package, so the first version is published by hand (below). A new trusted-publisher configuration expires unless it publishes within 2 days: set it up just before the first tagged release.
-   - Then Settings → Publishing access → *Require two-factor authentication and disallow tokens*. CI keeps working (OIDC is not a token).
+   - Allowed actions: leave **Allow `npm publish`** and **Allow `npm dist-tag`** unticked. CI only stages (`npm stage publish` is always allowed); a maintainer approves each version with 2FA.
+   - npm sets this up on an existing package, so the first version is published by hand (below). A new trusted-publisher configuration expires unless it is used within 2 days, and its fields cannot be edited: create it just before the first tagged release (delete and recreate it if it expired).
+   - Settings → Publishing access → *Require two-factor authentication and disallow bypass 2fa tokens*. CI keeps working (OIDC is not a token).
 4. **Actions may open pull requests** — Settings → Actions → General → *Allow GitHub Actions to create and approve pull requests*, for `sync-openapi.yml`.
 
 ## The first publish (by hand)
@@ -41,7 +41,8 @@ npm publish --access public --provenance=false   # provenance is only possible f
    git tag v0.1.1 <commit on main>
    git push origin v0.1.1
    ```
-4. Approve the `npm` environment deployment in the Actions run.
+4. Approve the `npm` environment deployment in the Actions run. The job **stages** the version.
+5. Approve the staged version with 2FA: npmjs.com → `@charchy/send` → **Staged Packages** → **Approve** (or `npm stage list @charchy/send`, then `npm stage approve <id>`). Only then is it on the registry. Reject it there if anything looks wrong.
 
 ## Before tagging
 

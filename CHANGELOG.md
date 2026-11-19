@@ -2,6 +2,10 @@
 
 `@charchy/send` follows semantic versioning. Until 1.0 (after the private beta), a minor version may change the API; a patch never does.
 
+## 0.1.1 — 2026-11-19
+
+No code changes. The README lists pnpm, yarn and bun installs, and this is the first version published by CI with provenance (staged, then approved with 2FA).
+
 ## 0.1.0 — 2026-11-17
 
 The first version, for the Charchy Send v1 API.
