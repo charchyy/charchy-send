@@ -254,7 +254,7 @@ export const POST = webhookHandler({
 })
 ```
 
-It answers `204` once the handler finished (or when there is none for that type), `400` with no detail to a request that fails verification, `405` to anything but `POST`, and `500` when a handler throws or the secret is missing — so Charchy Send retries the event once you've fixed it. The secret defaults to `CHARCHY_WEBHOOK_SECRET`; pass `{ secret, onError }` to change it or to log refusals. Handlers run before the answer: keep them under a few seconds, or hand the work to a queue. Also on the client as `send.webhooks.handler`.
+It answers `204` once the handler finished (or when there is none for that type), `400` with no detail to a request that fails verification, `405` to anything but `POST`, and `500` when a handler throws or the secret is missing — so Charchy Send retries the event once you've fixed it. The secret defaults to `CHARCHY_WEBHOOK_SECRET`; pass `{ secret, onError }` to change it or to log refusals. Handlers run before the answer: keep them under a few seconds, or hand the work to a queue. Also on the client as `send.webhooks.handler`. On Hono, use [`charchyWebhook`](#hono) — it reads the secret from Workers bindings too.
 
 ### Verify it yourself: `verifyWebhook`
 
@@ -297,6 +297,45 @@ async function handleCharchyEvent(event: WebhookEvent) {
 
 Dedupe by `event.id` (the same on every retry) and order by `event.createdAt`. Events: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.failed`, `email.suppressed`, `email.expired`, `email.canceled`, `domain.verified`, `domain.failed`, `account.paused`, `account.resumed`, `balance.low` — see [Events](https://charchy.krd/docs/events).
 
+## Hono
+
+`@charchy/send/hono` reads the key and the webhook secret where Hono keeps them: the Workers binding on `c.env` first, then `process.env` (Node, Bun, Deno, Vercel, Lambda), then `Deno.env`. `hono` 4 is an optional peer dependency; the root entry never imports it.
+
+```ts
+import { Hono } from "hono"
+import { charchySend, charchyWebhook, type CharchySendVariables } from "@charchy/send/hono"
+
+type AppEnv = {
+  Bindings: { CHARCHY_SEND_KEY: string; CHARCHY_WEBHOOK_SECRET: string }
+  Variables: CharchySendVariables
+}
+
+const app = new Hono<AppEnv>()
+
+// Before any body-parsing middleware: the signature is over the raw bytes.
+app.post(
+  "/webhooks/charchy",
+  charchyWebhook<AppEnv>({
+    "email.bounced": async (event, c) => markBounced(event.data.recipient, event.data.bounce.type),
+  })
+)
+
+app.use("/api/*", charchySend()) // sets c.var.charchySend
+app.post("/api/orders/:id/confirm", async (c) => {
+  const { error } = await c.var.charchySend.emails.send(
+    { from, to, subject: "Order confirmed", html },
+    { idempotencyKey: `order-confirmation/${c.req.param("id")}` }
+  )
+  return error ? c.json({ error: error.code }, 502) : c.body(null, 204)
+})
+
+export default app
+```
+
+`charchySend(options?)` takes the client's options plus `apiKey` (a string, or `(c) => string | Promise<string>` for another binding name or a Secrets Store) and `variable` (default `"charchySend"`; `CharchySendVariables<"mailer">` types a renamed one). The key is read per request and one client is kept per key. Without a key the client is still set, and its calls return `missing_api_key`.
+
+`charchyWebhook(handlers, options?)` answers like `webhookHandler` (`204`, `400`, `405`, `500`); each handler also gets the context (`c.env`, `c.var`, `c.executionCtx.waitUntil`). `secret` and `onError(error, event, c)` are optional. A body that was already consumed is answered `500` with a `WebhookBodyUnavailableError` (logged by default): one read through `c.req.json()`/`text()`/`arrayBuffer()` is cached by Hono and still verifies (a `json()` read only from Hono 4.9); a read straight from `c.req.raw` cannot.
+
 ## Test mode
 
 ```ts
@@ -326,7 +365,7 @@ The key must be `chy_live_` or `chy_test_` and 64 hex characters, checked on eac
 
 ## Runtimes
 
-Uses only `fetch`, `FormData`, `Blob`, `TextEncoder` and Web Crypto. Node 18+ (on Node 18, Web Crypto comes from `node:crypto`), Bun, Deno (`npm:@charchy/send`), Vercel Edge and Node runtimes, Cloudflare Workers, AWS Lambda. `react` needs `@react-email/render`, which needs Node 20+.
+Uses only `fetch`, `FormData`, `Blob`, `TextEncoder` and Web Crypto. On Cloudflare Workers the key is a binding, not `process.env`: pass it (`new CharchySend(env.CHARCHY_SEND_KEY)`), or use [`@charchy/send/hono`](#hono). Node 18+ (on Node 18, Web Crypto comes from `node:crypto`), Bun, Deno (`npm:@charchy/send`), Vercel Edge and Node runtimes, Cloudflare Workers, AWS Lambda. `react` needs `@react-email/render`, which needs Node 20+.
 
 ## Types
 

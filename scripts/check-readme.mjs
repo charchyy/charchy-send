@@ -77,7 +77,7 @@ writeFileSync(
         noUncheckedIndexedAccess: true,
         skipLibCheck: true,
         noEmit: true,
-        paths: { "@charchy/send": ["../src/index.ts"] },
+        paths: { "@charchy/send": ["../src/index.ts"], "@charchy/send/hono": ["../src/hono.ts"] },
       },
       include: ["**/*.ts", "**/*.tsx"],
     },

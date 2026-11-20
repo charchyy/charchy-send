@@ -2,6 +2,14 @@
 
 `@charchy/send` follows semantic versioning. Until 1.0 (after the private beta), a minor version may change the API; a patch never does.
 
+## 0.2.0 — unreleased
+
+`@charchy/send/hono`: Charchy Send for Hono apps, where a Cloudflare Workers secret is a binding on `c.env` and not in `process.env`. `hono` 4 is an optional peer dependency; the root entry is unchanged and still has no dependencies.
+
+- `charchySend(options?)` middleware sets `c.var.charchySend`. The key is read per request: `apiKey` (a string, or a function of the context — another binding name, an async Secrets Store), else the `CHARCHY_SEND_KEY` binding, else `process.env`, else `Deno.env`. One client per key, not one per request. Takes the client's options, checked when the app is built, and `variable` to rename it. `CharchySendVariables` types it: `new Hono<{ Variables: CharchySendVariables }>()`.
+- `charchyWebhook(handlers, options?)`: a Hono handler with `webhookHandler`'s answers (`204`, `400`, `405`, `500`). Handlers get the event and the context. The secret comes from `secret`, else the `CHARCHY_WEBHOOK_SECRET` binding, else `process.env`. The raw body is read through Hono's body cache, so a middleware that read it first with `c.req.text()`, `arrayBuffer()` or (Hono 4.9+) `json()` does not break verification. A body that cannot be recovered byte for byte is answered `500` with a `WebhookBodyUnavailableError`, logged by default.
+- `webhookHandler` and `charchyWebhook` share one implementation; `webhookHandler`'s answers are unchanged.
+
 ## 0.1.1 — 2026-11-19
 
 No code changes. The README lists pnpm, yarn and bun installs, and this is the first version published by CI with provenance (staged, then approved with 2FA).

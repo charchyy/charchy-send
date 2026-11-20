@@ -269,40 +269,88 @@ export type WebhookHandlerOptions = {
  * delivery times out at 5), or hand the work to a queue.
  */
 export function webhookHandler(handlers: WebhookHandlers, options: WebhookHandlerOptions = {}): (request: Request) => Promise<Response> {
-  const report = async (error: unknown, event: WebhookEvent | null) => {
+  const report = webhookErrorReporter(options.onError)
+  return (request: Request): Promise<Response> =>
+    answerWebhook({
+      method: request.method,
+      headers: request.headers,
+      readPayload: async () => new Uint8Array(await request.arrayBuffer()),
+      resolveSecret: async () => options.secret,
+      handlerFor: (type) => handlers[type] as ((event: WebhookEvent) => unknown) | undefined,
+      report,
+    })
+}
+
+/** @internal `options.onError`, or the default: log handler failures only. A failing logger never changes the answer. */
+export function webhookErrorReporter(onError: WebhookHandlerOptions["onError"]): (error: unknown, event: WebhookEvent | null) => Promise<void> {
+  return async (error, event) => {
     try {
-      if (options.onError) await options.onError(error, event)
+      if (onError) await onError(error, event)
       else if (event) console.error(`[@charchy/send] The ${event.type} webhook handler threw:`, error)
     } catch {
       // A failing logger must not change the answer.
     }
   }
+}
 
-  return async (request: Request): Promise<Response> => {
-    if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } })
-    let event: WebhookEvent
-    try {
-      const payload = new Uint8Array(await request.arrayBuffer())
-      event = await verifyWebhook({ payload, headers: request.headers, ...(options.secret !== undefined ? { secret: options.secret } : {}) })
-    } catch (error) {
-      await report(error, null)
-      const misconfigured = error instanceof WebhookVerificationError && (error.reason === "missing_secret" || error.reason === "invalid_secret")
-      return misconfigured
-        ? new Response("Webhook endpoint misconfigured", { status: 500 })
-        : new Response("Invalid webhook", { status: 400 })
-    }
+/** @internal One webhook request, whatever the framework. */
+export type WebhookRequest = {
+  method: string
+  headers: WebhookHeaders
+  /** The raw body. A throw is answered 400, like a body that fails verification. */
+  readPayload: () => Promise<Uint8Array>
+  /** Undefined: `CHARCHY_WEBHOOK_SECRET` from `process.env`. A throw is answered 500. */
+  resolveSecret: () => Promise<string | undefined>
+  handlerFor: (type: WebhookEventType) => ((event: WebhookEvent) => unknown) | undefined
+  report: (error: unknown, event: WebhookEvent | null) => Promise<void>
+}
 
-    const handle = handlers[event.type] as ((event: WebhookEvent) => unknown) | undefined
-    if (handle) {
-      try {
-        await handle(event)
-      } catch (error) {
-        await report(error, event)
-        return new Response("Webhook handler failed", { status: 500 })
-      }
-    }
-    return new Response(null, { status: 204 })
+/** @internal The answers `webhookHandler` documents — shared by every adapter so they can't drift. */
+export async function answerWebhook(request: WebhookRequest): Promise<Response> {
+  if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } })
+  let secret: string | undefined
+  try {
+    secret = await request.resolveSecret()
+  } catch (error) {
+    await request.report(error, null)
+    return misconfiguredResponse()
   }
+  let event: WebhookEvent
+  try {
+    const payload = await request.readPayload()
+    event = await verifyWebhook({ payload, headers: request.headers, ...(secret !== undefined ? { secret } : {}) })
+  } catch (error) {
+    await request.report(error, null)
+    const misconfigured =
+      error instanceof WebhookBodyUnavailableError ||
+      (error instanceof WebhookVerificationError && (error.reason === "missing_secret" || error.reason === "invalid_secret"))
+    return misconfigured ? misconfiguredResponse() : new Response("Invalid webhook", { status: 400 })
+  }
+
+  const handle = request.handlerFor(event.type)
+  if (handle) {
+    try {
+      await handle(event)
+    } catch (error) {
+      await request.report(error, event)
+      return new Response("Webhook handler failed", { status: 500 })
+    }
+  }
+  return new Response(null, { status: 204 })
+}
+
+/**
+ * The raw body can no longer be read: something before the endpoint consumed
+ * it (a framework adapter throws this; `webhookHandler` never does). Answered
+ * 500 — the endpoint's fault, so the event is retried once it is fixed.
+ */
+export class WebhookBodyUnavailableError extends Error {
+  override readonly name = "WebhookBodyUnavailableError"
+}
+
+/** @internal 500, so Charchy Send retries the event once the endpoint is fixed. */
+export function misconfiguredResponse(): Response {
+  return new Response("Webhook endpoint misconfigured", { status: 500 })
 }
 
 export class Webhooks {
