@@ -2,7 +2,7 @@
 
 `@charchy/send` follows semantic versioning. Until 1.0 (after the private beta), a minor version may change the API; a patch never does.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-11-21
 
 `@charchy/send/hono`: Charchy Send for Hono apps, where a Cloudflare Workers secret is a binding on `c.env` and not in `process.env`. `hono` 4 is an optional peer dependency; the root entry is unchanged and still has no dependencies.
 
